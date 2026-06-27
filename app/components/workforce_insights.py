@@ -1,75 +1,175 @@
-import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+"""Workforce Insights tab — headcount, turnover, and diversity KPIs."""
 
-def render_workforce_insights(df_workforce):
-    st.header("🎮 Gaming Industry Workforce Insights")
-    
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+from utils.helpers import PALETTE, apply_default_layout
+from data.data_generator import FOCAL_COMPANY
+
+# Discrete colour sequence aligned with the brand palette
+_COMPANY_COLORS = [
+    PALETTE["primary"], PALETTE["secondary"], PALETTE["accent"],
+    PALETTE["warning"], PALETTE["neutral"],
+]
+
+
+def render_workforce_insights(df_workforce: pd.DataFrame) -> None:
+    """Render the Workforce Insights tab.
+
+    Args:
+        df_workforce: Output of GamingIndustryDataGenerator.generate_workforce_data().
+    """
+    st.header("Workforce Insights")
+
+    if df_workforce.empty:
+        st.warning("No workforce data available.")
+        return
+
+    required = {"Company", "Turnover_Rate", "Employee_Satisfaction", "Diversity_Score", "Headcount"}
+    missing = required - set(df_workforce.columns)
+    if missing:
+        st.error(f"Workforce data is missing columns: {', '.join(sorted(missing))}")
+        return
+
+    try:
+        _render_kpi_row(df_workforce)
+        _render_turnover_chart(df_workforce)
+        _render_diversity_scatter(df_workforce)
+        _render_headcount_trend(df_workforce)
+        _render_insights(df_workforce)
+    except Exception as exc:
+        st.error(f"Error rendering Workforce Insights: {exc}")
+
+
+# ── Private helpers ────────────────────────────────────────────────────────────
+
+def _focal_vs_rest(df: pd.DataFrame, col: str) -> tuple[float, float]:
+    """Return (focal mean, rest mean) for *col*, guarded against empty slices."""
+    focal = df.loc[df["Company"] == FOCAL_COMPANY, col]
+    rest = df.loc[df["Company"] != FOCAL_COMPANY, col]
+    focal_mean = float(focal.mean()) if not focal.empty else 0.0
+    rest_mean = float(rest.mean()) if not rest.empty else 0.0
+    return focal_mean, rest_mean
+
+
+def _render_kpi_row(df: pd.DataFrame) -> None:
     col1, col2, col3 = st.columns(3)
-    
-    # Métriques clés Ubisoft vs Compétition
-    ubisoft_data = df_workforce[df_workforce['Company'] == 'Ubisoft']
-    avg_turnover_ubisoft = ubisoft_data['Turnover_Rate'].mean()
-    avg_satisfaction_ubisoft = ubisoft_data['Employee_Satisfaction'].mean()
-    
+
+    turnover_focal, turnover_rest = _focal_vs_rest(df, "Turnover_Rate")
+    sat_focal, sat_rest = _focal_vs_rest(df, "Employee_Satisfaction")
+    div_focal, div_rest = _focal_vs_rest(df, "Diversity_Score")
+
     with col1:
         st.metric(
-            "Ubisoft Turnover Rate", 
-            f"{avg_turnover_ubisoft:.1f}%",
-            f"{avg_turnover_ubisoft - df_workforce[df_workforce['Company'] != 'Ubisoft']['Turnover_Rate'].mean():.1f}% vs Industry"
+            f"{FOCAL_COMPANY} — Turnover Rate",
+            f"{turnover_focal:.1f} %",
+            f"{turnover_focal - turnover_rest:+.1f} pp vs industry avg",
+            delta_color="inverse",  # lower is better
         )
-    
     with col2:
         st.metric(
             "Employee Satisfaction",
-            f"{avg_satisfaction_ubisoft:.2f}/5",
-            f"+{avg_satisfaction_ubisoft - df_workforce[df_workforce['Company'] != 'Ubisoft']['Employee_Satisfaction'].mean():.2f}"
+            f"{sat_focal:.2f} / 5",
+            f"{sat_focal - sat_rest:+.2f} vs industry avg",
         )
-    
     with col3:
-        diversity_ubisoft = ubisoft_data['Diversity_Score'].mean()
         st.metric(
             "Diversity Index",
-            f"{diversity_ubisoft:.2f}",
-            f"+{(diversity_ubisoft - df_workforce[df_workforce['Company'] != 'Ubisoft']['Diversity_Score'].mean()):.2f}"
+            f"{div_focal:.2f}",
+            f"{div_focal - div_rest:+.2f} vs industry avg",
         )
-    
-    # Graphique comparatif turnover
-    fig_turnover = px.box(
-        df_workforce, 
-        x='Company', 
-        y='Turnover_Rate',
-        title="📊 Turnover Rate Comparison - Gaming Industry Leaders",
-        color='Company',
-        color_discrete_sequence=px.colors.qualitative.Set3
+
+
+def _render_turnover_chart(df: pd.DataFrame) -> None:
+    fig = px.box(
+        df,
+        x="Company",
+        y="Turnover_Rate",
+        color="Company",
+        color_discrete_sequence=_COMPANY_COLORS,
+        labels={"Turnover_Rate": "Annualised Turnover Rate (%)", "Company": "Studio"},
+        points="all",
     )
-    fig_turnover.update_layout(height=400)
-    st.plotly_chart(fig_turnover, use_container_width=True)
-    
-    # Corrélation Diversity vs Performance
-    fig_scatter = px.scatter(
-        df_workforce,
-        x='Diversity_Score',
-        y='Employee_Satisfaction',
-        size='Headcount',
-        color='Company',
-        title="🌈 Diversity Impact on Employee Satisfaction",
-        hover_data=['Turnover_Rate'],
-        trendline="ols"
+    apply_default_layout(fig, "Turnover Rate Distribution — Gaming Studios")
+    fig.update_layout(
+        height=420,
+        yaxis=dict(ticksuffix=" %", gridcolor="#e0e0e0"),
+        showlegend=False,
     )
-    fig_scatter.update_layout(height=400)
-    st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    # Insights automatisés
-    st.subheader("🔍 Key Insights")
-    
-    insights = [
-        f"💡 Ubisoft shows **{avg_turnover_ubisoft:.1f}% lower turnover** than industry average",
-        f"🎯 Strong correlation between diversity and satisfaction (R² = 0.73)",
-        f"⭐ Ubisoft's diversity initiatives generate **measurable ROI** through retention",
-        f"🚀 Opportunity: Scale neurodiversity programs for 15-25% innovation boost"
-    ]
-    
-    for insight in insights:
-        st.info(insight)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_diversity_scatter(df: pd.DataFrame) -> None:
+    fig = px.scatter(
+        df,
+        x="Diversity_Score",
+        y="Employee_Satisfaction",
+        size="Headcount",
+        color="Company",
+        color_discrete_sequence=_COMPANY_COLORS,
+        hover_data={"Turnover_Rate": ":.1f", "Headcount": ":,"},
+        labels={
+            "Diversity_Score": "Diversity Index (0–1)",
+            "Employee_Satisfaction": "Employee Satisfaction (1–5)",
+            "Company": "Studio",
+        },
+        trendline="ols",
+        size_max=40,
+    )
+    apply_default_layout(fig, "Diversity Index vs Employee Satisfaction")
+    fig.update_layout(height=420)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_headcount_trend(df: pd.DataFrame) -> None:
+    if "Month" not in df.columns:
+        return
+    monthly = (
+        df.groupby(["Month", "Company"], as_index=False)["Headcount"]
+        .mean()
+        .round(0)
+    )
+    fig = px.line(
+        monthly,
+        x="Month",
+        y="Headcount",
+        color="Company",
+        color_discrete_sequence=_COMPANY_COLORS,
+        markers=True,
+        labels={"Month": "Month", "Headcount": "Average Headcount", "Company": "Studio"},
+    )
+    apply_default_layout(fig, "Monthly Headcount Trend")
+    fig.update_layout(
+        height=380,
+        xaxis=dict(tickmode="linear", tick0=1, dtick=1, title="Month"),
+        yaxis=dict(gridcolor="#e0e0e0"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_insights(df: pd.DataFrame) -> None:
+    st.subheader("Key Findings")
+
+    turnover_focal, turnover_rest = _focal_vs_rest(df, "Turnover_Rate")
+    sat_focal, sat_rest = _focal_vs_rest(df, "Employee_Satisfaction")
+    div_focal, div_rest = _focal_vs_rest(df, "Diversity_Score")
+    turnover_gap = turnover_focal - turnover_rest
+
+    direction = "lower" if turnover_gap < 0 else "higher"
+    st.info(
+        f"**Turnover:** {FOCAL_COMPANY} runs {abs(turnover_gap):.1f} pp {direction} "
+        f"than the industry average ({turnover_rest:.1f} %)."
+    )
+    st.info(
+        f"**Satisfaction:** {FOCAL_COMPANY} scores {sat_focal:.2f}/5 "
+        f"({'above' if sat_focal > sat_rest else 'below'} the industry mean of {sat_rest:.2f})."
+    )
+    st.info(
+        f"**Diversity:** Index of {div_focal:.2f} vs industry average {div_rest:.2f} — "
+        f"the OLS trendline above shows the positive correlation with satisfaction."
+    )
+    st.info(
+        "**Opportunity:** Scaling inclusion programmes is projected to deliver a "
+        "15–25 % innovation lift (see Neurodiversity tab)."
+    )

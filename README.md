@@ -6,25 +6,28 @@
 [![Streamlit](https://img.shields.io/badge/streamlit-brightred)](https://streamlit.io/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Disclaimer:** This is a portfolio project. All data is synthetic. Not affiliated with any company.
+> **Disclaimer:** This is an independent portfolio project. All data is 100% synthetic and generated programmatically. Not affiliated with, endorsed by, or connected to any gaming company.
 
 ---
 
 ## Overview
 
-An interactive Streamlit dashboard for HR analytics in the gaming industry — workforce planning, diversity KPIs, salary benchmarking, and attrition modeling.
+An interactive Streamlit dashboard for HR analytics in the gaming industry, covering workforce planning, diversity & inclusion KPIs, attrition modeling, and people ROI analysis.
 
-Built as a portfolio case study to demonstrate applied HR analytics techniques using Python, SQL, and interactive visualization.
+The project simulates a realistic HR dataset for a fictional multi-studio gaming organization and applies standard people analytics techniques — from descriptive KPIs to predictive churn models — to demonstrate how data-driven HR decisions can be made in practice.
 
 ---
 
 ## Features
 
-- 📊 **Workforce dashboard** — headcount trends, department breakdown, seniority distribution
-- 🎯 **Diversity KPIs** — gender, seniority, and team composition tracking
-- 💰 **Salary analysis** — compensation distribution by role and region
-- 📉 **Attrition modeling** — churn risk scoring with feature importance (SHAP)
-- 🔍 **Interactive filters** — by studio, role, region, and time period
+| Module | Description |
+|---|---|
+| **Workforce Insights** | Headcount trends, department breakdown, seniority distribution |
+| **Diversity KPIs** | Gender, neurodiversity, and team composition tracking |
+| **Neurodiversity Analysis** | Inclusion metrics and accommodation tracking — uncommon in HR demos |
+| **Retention Modeling** | Churn risk scoring using ML models (scikit-learn) |
+| **Performance Dashboard** | Performance distribution by role, studio, and seniority |
+| **ROI Calculator** | Cost-of-attrition and people investment return estimates |
 
 ---
 
@@ -32,48 +35,117 @@ Built as a portfolio case study to demonstrate applied HR analytics techniques u
 
 ```
 hr-analytics-gaming/
-├── app.py                  # Main Streamlit application
-├── src/
-│   ├── data_loader.py      # Synthetic data generation
-│   ├── kpi_engine.py       # KPI computation logic
-│   └── viz.py              # Chart helpers (Plotly)
-├── data/
-│   └── synthetic/          # Auto-generated on first run
-├── requirements.txt
-└── README.md
+├── README.md
+└── app/
+    ├── app.py                        # Main Streamlit entry point
+    ├── components/
+    │   ├── workforce_insights.py     # Headcount & org breakdown
+    │   ├── neurodiversity.py         # Neurodiversity & inclusion KPIs
+    │   ├── retention_models.py       # Attrition / churn modeling
+    │   ├── performance.py            # Performance dashboard
+    │   └── roi_calculator.py         # People ROI & cost-of-attrition
+    ├── data/
+    │   ├── data_generator.py         # Synthetic dataset generation
+    │   ├── gaming_data.py            # Industry-specific constants & stats
+    │   └── sample_data.csv           # Pre-generated sample (for quick start)
+    ├── utils/
+    │   ├── etl.py                    # Data loading & transformation helpers
+    │   └── helpers.py                # Chart utilities, CSS loader
+    ├── src/
+    │   ├── api/                      # (Optional) REST API layer
+    │   ├── config/                   # App configuration
+    │   └── models/                   # ML model definitions
+    ├── tests/
+    │   ├── test_model.py
+    │   └── tests_etl.py
+    ├── notebooks/
+    │   └── analysis_demo.ipynb       # Exploratory analysis walkthrough
+    ├── business_case/
+    │   └── roi_calculation.md        # Methodology behind ROI estimates
+    ├── docs/
+    │   ├── architecture.md
+    │   ├── data_dictionary.md
+    │   └── models/
+    ├── deployment/
+    │   ├── Dockerfile
+    │   ├── docker_compose.yml
+    │   └── k8s/
+    ├── assets/
+    │   └── style.css
+    ├── requirements.txt
+    └── pyproject.toml
 ```
 
 ---
 
 ## Getting started
 
+### Local (recommended)
+
 ```bash
 git clone https://github.com/remichenouri/hr-analytics-gaming.git
-cd hr-analytics-gaming
+cd hr-analytics-gaming/app
 pip install -r requirements.txt
 streamlit run app.py
+```
+
+The app opens at `http://localhost:8501`. Synthetic data is generated on first load — no external database required.
+
+### Docker
+
+```bash
+cd app/deployment
+docker compose up
 ```
 
 ---
 
 ## Tech stack
 
-`Python 3.9+` · `Streamlit` · `pandas` · `Plotly` · `scikit-learn` · `SHAP` · `SQL`
+| Layer | Tools |
+|---|---|
+| Dashboard | Streamlit, Plotly |
+| Data & ETL | pandas, NumPy |
+| ML models | scikit-learn |
+| Code quality | Black, isort, flake8, pre-commit |
+| Testing | pytest |
+| CI/CD | GitHub Actions |
+| Deployment | Docker, Kubernetes |
+
+---
+
+## Data model
+
+All data is generated by `app/data/data_generator.py`. No real employee data is used at any point. The synthetic dataset includes:
+
+- Employee profiles (role, seniority, studio, region, start date)
+- Compensation bands
+- Attrition labels (for supervised modeling)
+- Performance scores
+- Neurodiversity self-declaration flags (fictional)
+
+See [app/docs/data_dictionary.md](app/docs/data_dictionary.md) for field-level documentation.
 
 ---
 
 ## Use cases
 
-- **HR analysts** — tracking workforce diversity and compensation equity
-- **Data analysts** — exploring HR analytics techniques on a realistic synthetic dataset
-- **Portfolio** — demonstrates applied analytics in a domain-specific context
+- **HR analysts** — see how KPIs and dashboards can be structured for a gaming org
+- **Data analysts** — explore people analytics techniques on a realistic synthetic dataset
+- **Portfolio reviewers** — applied analytics in a domain-specific, end-to-end context
+
+---
+
+## Contributing
+
+See [app/CONTRIBUTING.md](app/CONTRIBUTING.md) for guidelines on branching, commit conventions, and the review process.
 
 ---
 
 ## Contact
 
-**Rémi Chenouri** — Healthcare Data Analyst | Commercial Performance  
-📧 chenouri.remi@proton.me · [LinkedIn](https://linkedin.com/in/remi-chenouri)
+**Rémi Chenouri** — Data Analyst  
+[LinkedIn](https://linkedin.com/in/remi-chenouri) · remi.chenouri@gmail.com
 
 ---
 

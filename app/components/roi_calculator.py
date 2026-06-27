@@ -1,191 +1,295 @@
-import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-import pandas as pd
+"""ROI Calculator tab — cost-of-attrition and HR programme return analysis."""
+
+import logging
+
 import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 
-def render_roi_calculator_improved(df_roi):
-    st.header("💰 ROI Calculator - Retention & Diversity Programs")
-    # SECTION 1: ML-Powered ROI Prediction
-    st.subheader("🎯 ML-Powered ROI Prediction")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("**🤖 Modèle ML Integration**")
-        high_risk_employees = st.number_input("Employés à haut risque (ML)", 20, 200, 75)
-        medium_risk_employees = st.number_input("Employés à risque modéré (ML)", 50, 300, 120)
-        model_accuracy = st.slider("Précision du modèle ML", 0.6, 0.95, 0.82, 0.01)
-    with col2:
-        st.info("**💼 Paramètres Entreprise**")
-        company_size = st.number_input("Taille entreprise", 500, 5000, 1200)
-        avg_salary = st.number_input("Salaire moyen (€)", 40000, 120000, 75000)
-        current_turnover = st.slider("Taux turnover actuel (%)", 5, 30, 15)
+from utils.helpers import PALETTE, apply_default_layout
 
-    # SECTION 2: Program Parameters
-    st.subheader("🎛️ Program Parameters")
+logger = logging.getLogger(__name__)
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+REPLACEMENT_COST_MULTIPLIER = 1.8  # replacement = salary × 1.8 (fully-loaded cost)
+FIVE_YEAR_DECAY = 0.90             # annual savings decay factor for multi-year projection
+BUBBLE_SIZE_MAX = 40               # cap bubble marker size to avoid rendering issues
+BUBBLE_SIZE_MIN = 5
+
+
+def render_roi_calculator(df_roi: pd.DataFrame) -> None:
+    """Render the ROI Calculator tab.
+
+    Args:
+        df_roi: Output of GamingIndustryDataGenerator.generate_roi_data().
+    """
+    st.header("ROI Calculator — Retention & Inclusion Programmes")
+
+    if df_roi.empty:
+        st.warning("No ROI data available.")
+        return
+
+    try:
+        params = _render_input_section()
+        results = _compute_roi(**params)
+        _render_results_row(results)
+        _render_scenario_charts(results, params)
+        _render_five_year_projection(results)
+        _render_recommendations(results)
+    except Exception as exc:
+        logger.exception("ROI Calculator rendering failed.")
+        st.error(f"Calculation error: {exc}")
+
+
+# ── Input section ──────────────────────────────────────────────────────────────
+
+def _render_input_section() -> dict:
+    """Render sliders/inputs and return a dict of parameter values."""
+    st.subheader("Programme Parameters")
+
     col1, col2, col3 = st.columns(3)
+
     with col1:
-        st.write("**💰 Investissements**")
-        program_investment = st.number_input("Investment programme (€)", 10000, 500000, 150000)
-        cost_per_intervention = st.number_input("Coût par intervention (€)", 2000, 15000, 6000)
-        implementation_months = st.slider("Durée implémentation (mois)", 3, 24, 12)
+        st.markdown("**Company**")
+        company_size = st.number_input("Headcount", 200, 10_000, 1_200, step=50)
+        avg_salary = st.number_input("Avg annual salary (€)", 30_000, 200_000, 75_000, step=5_000)
+        current_turnover = st.slider("Current turnover rate (%)", 5, 35, 15)
+
     with col2:
-        st.write("**🎯 Efficacité Ciblage**")
-        intervention_success_rate = st.slider("Taux succès intervention", 0.2, 0.8, 0.45, 0.05)
-        targeting_precision = st.slider("Précision ciblage", 0.6, 0.95, 0.78, 0.01)
+        st.markdown("**Investment**")
+        programme_cost = st.number_input("Programme investment (€)", 10_000, 500_000, 150_000, step=10_000)
+        cost_per_intervention = st.number_input("Cost per intervention (€)", 500, 20_000, 6_000, step=500)
+        high_risk_n = st.number_input("High-risk employees (ML)", 5, 500, 75)
+        medium_risk_n = st.number_input("Medium-risk employees (ML)", 5, 500, 120)
+
     with col3:
-        st.write("**📊 Impact Différentiel**")
-        neuro_retention_boost = st.slider("Boost rétention neurodivergents (%)", 5, 40, 18, 1)
-        regular_retention_boost = st.slider("Boost rétention autres (%)", 3, 25, 12, 1)
+        st.markdown("**Effectiveness**")
+        intervention_success = st.slider("Intervention success rate", 0.10, 0.90, 0.45, 0.05)
+        targeting_precision = st.slider("ML targeting precision", 0.50, 0.99, 0.78, 0.01)
+        model_accuracy = st.slider("Model accuracy", 0.55, 0.99, 0.82, 0.01)
 
-    # SECTION 3: Calculs ROI
-    multiplier = 1.8
-    cost_per_departure = avg_salary * multiplier
-    base_high = high_risk_employees * 0.75 * targeting_precision
-    base_med = medium_risk_employees * 0.45 * targeting_precision
-    total_base = base_high + base_med
-    saved = total_base * intervention_success_rate
-    total_savings = saved * cost_per_departure
-    total_interventions = high_risk_employees + medium_risk_employees
-    total_intervention_cost = total_interventions * cost_per_intervention
-    total_program_cost = program_investment + total_intervention_cost
-    net_roi = total_savings - total_program_cost
-    roi_pct = (net_roi / total_program_cost) * 100 if total_program_cost > 0 else 0
+    return dict(
+        company_size=company_size,
+        avg_salary=avg_salary,
+        current_turnover=current_turnover,
+        programme_cost=programme_cost,
+        cost_per_intervention=cost_per_intervention,
+        high_risk_n=high_risk_n,
+        medium_risk_n=medium_risk_n,
+        intervention_success=intervention_success,
+        targeting_precision=targeting_precision,
+        model_accuracy=model_accuracy,
+    )
 
-    # SECTION 4: Résultats
-    st.subheader("📊 ROI Analysis Results")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("💰 Économies Totales", f"€{total_savings:,.0f}", f"{saved:.0f} sauvés")
-    m2.metric("📈 ROI Net (An 1)", f"€{net_roi:,.0f}", f"{roi_pct:.0f}%")
-    months = (total_program_cost / (total_savings / 12)) if total_savings > 0 else float('inf')
-    m3.metric("⏱️ Récupération", f"{months:.1f} mois" if months != float('inf') else "N/A", "Break-even")
-    confidence = model_accuracy * targeting_precision * intervention_success_rate
-    m4.metric("🎯 Score Confiance", f"{confidence:.1%}", "Fiabilité")
 
-    # SECTION 5: Dashboard Interactif
-    st.subheader("📊 Dashboard ROI Interactif")
+# ── ROI computation ────────────────────────────────────────────────────────────
 
-    # 5.1 Bubble Chart
+def _compute_roi(
+    company_size: int,
+    avg_salary: float,
+    current_turnover: float,
+    programme_cost: float,
+    cost_per_intervention: float,
+    high_risk_n: int,
+    medium_risk_n: int,
+    intervention_success: float,
+    targeting_precision: float,
+    model_accuracy: float,
+) -> dict:
+    """Compute all ROI metrics from input parameters.
+
+    Returns a flat dict of labelled results.
+    """
+    cost_per_departure = avg_salary * REPLACEMENT_COST_MULTIPLIER
+
+    reachable_high = high_risk_n * 0.75 * targeting_precision
+    reachable_med = medium_risk_n * 0.45 * targeting_precision
+    total_reachable = reachable_high + reachable_med
+
+    employees_saved = total_reachable * intervention_success
+    total_savings = employees_saved * cost_per_departure
+
+    total_intervention_cost = (high_risk_n + medium_risk_n) * cost_per_intervention
+    total_cost = programme_cost + total_intervention_cost
+
+    net_roi = total_savings - total_cost
+    roi_pct = (net_roi / total_cost * 100.0) if total_cost > 0 else 0.0
+
+    # Break-even in months (avoid division by zero)
+    monthly_savings = total_savings / 12.0
+    payback_months = (total_cost / monthly_savings) if monthly_savings > 0 else float("inf")
+
+    confidence = model_accuracy * targeting_precision * intervention_success
+
+    return dict(
+        cost_per_departure=cost_per_departure,
+        employees_saved=employees_saved,
+        total_savings=total_savings,
+        total_cost=total_cost,
+        net_roi=net_roi,
+        roi_pct=roi_pct,
+        payback_months=payback_months,
+        confidence=confidence,
+        programme_cost=programme_cost,
+        total_intervention_cost=total_intervention_cost,
+        high_risk_n=high_risk_n,
+        medium_risk_n=medium_risk_n,
+        intervention_success=intervention_success,
+        targeting_precision=targeting_precision,
+    )
+
+
+# ── Results row ────────────────────────────────────────────────────────────────
+
+def _render_results_row(r: dict) -> None:
+    st.subheader("Results")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Savings", f"€{r['total_savings']:,.0f}", f"{r['employees_saved']:.0f} departures avoided")
+    c2.metric("Net ROI (Year 1)", f"€{r['net_roi']:,.0f}", f"{r['roi_pct']:+.0f} %")
+    payback = f"{r['payback_months']:.1f} months" if r["payback_months"] != float("inf") else "N/A"
+    c3.metric("Break-Even", payback)
+    c4.metric("Confidence Score", f"{r['confidence']:.1%}", help="model accuracy × targeting precision × success rate")
+
+
+# ── Charts ─────────────────────────────────────────────────────────────────────
+
+def _render_scenario_charts(r: dict, params: dict) -> None:
     col1, col2 = st.columns(2)
+
     with col1:
-        scenarios = []
-        for sr in np.arange(0.2, 0.8, 0.1):
-            for pr in np.arange(0.6, 0.9, 0.05):
-                base = (high_risk_employees * 0.75 + medium_risk_employees * 0.45) * pr
-                saved_s = base * sr
-                savings = saved_s * cost_per_departure
-                roi = ((savings - total_program_cost) / total_program_cost) * 100
-                scenarios.append({"sr": sr * 100, "pr": pr * 100, "roi": roi, "conf": sr * pr})
-        df_s = pd.DataFrame(scenarios)
-        fig_b = go.Figure(go.Scatter(
-            x=df_s["sr"], y=df_s["pr"], mode="markers",
-            marker=dict(size=df_s["roi"] / 5, color=df_s["roi"], colorscale="RdYlGn", showscale=True),
-            text=[f"ROI : {r:.0f}%<br>Conf : {c:.1%}" for r, c in zip(df_s["roi"], df_s["conf"])],
-            hovertemplate="%{x}% SR<br>%{y}% PR<br>%{text}<extra></extra>"
-        ))
-        fig_b.update_layout(title="🎯 Matrice ROI par Succès vs Précision",
-                            xaxis_title="Taux Succès (%)", yaxis_title="Précision (%)", height=450)
-        st.plotly_chart(fig_b, use_container_width=True)
-
-    # 5.2 Waterfall Chart
+        _render_bubble_chart(r, params)
     with col2:
-        cats = ["Invest. Init.", "Coût Int.", "Économies", "ROI Net"]
-        vals = [-program_investment, -total_intervention_cost, total_savings, net_roi]
-        fig_w = go.Figure(go.Waterfall(
-            orientation="v", measure=["relative"] * 3 + ["total"], x=cats, y=vals,
-            text=[f"€{abs(v):,.0f}" for v in vals], textposition="outside",
-            connector={"line": {"color": "#555"}}
-        ))
-        fig_w.update_layout(title="💰 Décomposition ROI - Waterfall", height=450)
-        st.plotly_chart(fig_w, use_container_width=True)
+        _render_waterfall_chart(r)
 
-    # 5.3 Heatmap
-    st.subheader("🔥 Heatmap de Sensibilité ROI")
-    srs = np.arange(0.2, 0.8, 0.05)
-    prs = np.arange(0.6, 0.95, 0.02)
-    heat = np.zeros((len(srs), len(prs)))
-    for i, sr in enumerate(srs):
-        for j, pr in enumerate(prs):
-            base = (high_risk_employees * 0.75 + medium_risk_employees * 0.45) * pr
-            saved_s = base * sr
-            savings = saved_s * cost_per_departure
-            heat[i, j] = ((savings - total_program_cost) / total_program_cost) * 100
-    fig_h = go.Figure(go.Heatmap(
-        z=heat, x=[f"{p:.0%}" for p in prs], y=[f"{s:.0%}" for s in srs],
-        colorscale="RdYlGn", colorbar=dict(title="ROI %")
+
+def _render_bubble_chart(r: dict, params: dict) -> None:
+    """Scenario matrix: success rate × targeting precision → ROI %."""
+    records = []
+    for sr in np.arange(0.10, 0.91, 0.10):
+        for pr in np.arange(0.50, 1.00, 0.05):
+            reachable = (params["high_risk_n"] * 0.75 + params["medium_risk_n"] * 0.45) * pr
+            savings = reachable * sr * r["cost_per_departure"]
+            roi = (savings - r["total_cost"]) / r["total_cost"] * 100.0 if r["total_cost"] > 0 else 0.0
+            records.append({"Success Rate": sr * 100, "Precision": pr * 100, "ROI %": roi})
+
+    df_s = pd.DataFrame(records)
+
+    # Clamp bubble sizes to avoid negative values from negative ROI
+    raw_size = df_s["ROI %"]
+    size_scaled = np.clip((raw_size - raw_size.min()) / max(raw_size.max() - raw_size.min(), 1e-9), 0, 1)
+    bubble_sizes = (BUBBLE_SIZE_MIN + size_scaled * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN)).tolist()
+
+    fig = go.Figure(go.Scatter(
+        x=df_s["Success Rate"],
+        y=df_s["Precision"],
+        mode="markers",
+        marker=dict(
+            size=bubble_sizes,
+            color=df_s["ROI %"],
+            colorscale="RdYlGn",
+            showscale=True,
+            colorbar=dict(title="ROI %"),
+        ),
+        text=[f"ROI: {v:.0f}%<br>Conf: {s/100*p/100:.1%}"
+              for v, s, p in zip(df_s["ROI %"], df_s["Success Rate"], df_s["Precision"])],
+        hovertemplate="%{x:.0f}% success rate<br>%{y:.0f}% precision<br>%{text}<extra></extra>",
     ))
-    fig_h.update_layout(title="🌡️ Heatmap ROI vs Paramètres",
-                        xaxis_title="Précision", yaxis_title="Succès", height=400)
-    st.plotly_chart(fig_h, use_container_width=True)
+    apply_default_layout(fig, "ROI Sensitivity Matrix")
+    fig.update_layout(
+        height=440,
+        xaxis=dict(title="Intervention Success Rate (%)", ticksuffix=" %"),
+        yaxis=dict(title="ML Targeting Precision (%)", ticksuffix=" %"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-    # 5.4 Timeline ROI sur 5 ans
-    st.subheader("📈 Évolution du ROI sur 5 ans")
+
+def _render_waterfall_chart(r: dict) -> None:
+    categories = ["Programme Cost", "Intervention Cost", "Savings", "Net ROI"]
+    values = [-r["programme_cost"], -r["total_intervention_cost"], r["total_savings"], r["net_roi"]]
+
+    fig = go.Figure(go.Waterfall(
+        orientation="v",
+        measure=["relative", "relative", "relative", "total"],
+        x=categories,
+        y=values,
+        text=[f"€{abs(v):,.0f}" for v in values],
+        textposition="outside",
+        increasing=dict(marker=dict(color=PALETTE["success"])),
+        decreasing=dict(marker=dict(color=PALETTE["danger"])),
+        totals=dict(marker=dict(color=PALETTE["primary"])),
+        connector=dict(line=dict(color=PALETTE["neutral"], width=1)),
+    ))
+    apply_default_layout(fig, "ROI Waterfall — Year 1")
+    fig.update_layout(height=440, yaxis=dict(gridcolor="#e0e0e0"))
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_five_year_projection(r: dict) -> None:
+    st.subheader("5-Year Cumulative ROI Projection")
     years = list(range(1, 6))
-    cum = []
-    for k, year in enumerate(years):
-        factor = 0.9**k
-        yearly = total_savings * factor
-        value = yearly - total_program_cost if k == 0 else cum[-1] + yearly
-        cum.append(value)
-    fig_t = go.Figure(go.Scatter(x=years, y=cum, mode="lines+markers", fill="tonexty",
-                                 line=dict(color="#667eea", width=3), marker=dict(size=8)))
-    fig_t.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Break-even")
-    fig_t.update_layout(title="🌎 ROI Cumulé sur 5 ans", xaxis_title="Années", yaxis_title="ROI (€)", height=400)
-    st.plotly_chart(fig_t, use_container_width=True)
+    cumulative: list[float] = []
+    for k, _ in enumerate(years):
+        yearly_savings = r["total_savings"] * (FIVE_YEAR_DECAY ** k)
+        if k == 0:
+            cumulative.append(yearly_savings - r["total_cost"])
+        else:
+            cumulative.append(cumulative[-1] + yearly_savings)
 
-    # SECTION 6: Recommandations Stratégiques ML-Driven
-    st.subheader("🎯 Recommandations Stratégiques ML-Driven")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=years, y=cumulative,
+        mode="lines+markers",
+        fill="tozeroy",
+        fillcolor=f"rgba(23, 134, 122, 0.15)",
+        line=dict(color=PALETTE["primary"], width=3),
+        marker=dict(size=9),
+        hovertemplate="Year %{x}<br>Cumulative ROI: €%{y:,.0f}<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_dash="dash", line_color=PALETTE["danger"],
+                  annotation_text="Break-even", annotation_position="bottom right")
+    apply_default_layout(fig, "Cumulative ROI Over 5 Years")
+    fig.update_layout(
+        height=380,
+        xaxis=dict(title="Year", tickvals=years),
+        yaxis=dict(title="Cumulative ROI (€)", gridcolor="#e0e0e0"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-    if roi_pct > 200:
-        st.success("🚀 **ROI Exceptionnel** - Programme hautement rentable ! Déployez rapidement.")
-        priority = "HAUTE"
-    elif roi_pct > 100:
-        st.info("💡 **ROI Solide** - Investissement judicieux avec retours mesurables.")
-        priority = "MOYENNE"
-    elif roi_pct > 0:
-        st.warning("⚠️ **ROI Modéré** - Optimisez les paramètres avant déploiement.")
-        priority = "FAIBLE"
+
+def _render_recommendations(r: dict) -> None:
+    st.subheader("Strategic Recommendations")
+    roi = r["roi_pct"]
+
+    if roi > 200:
+        st.success("**Exceptional ROI** — Deploy the programme immediately and scale to all studios.")
+        priority = "HIGH"
+    elif roi > 100:
+        st.info("**Strong ROI** — Sound investment with measurable returns. Begin pilot phase.")
+        priority = "MEDIUM"
+    elif roi > 0:
+        st.warning("**Moderate ROI** — Optimise intervention targeting before full roll-out.")
+        priority = "LOW"
     else:
-        st.error("❌ **ROI Négatif** - Revisitez la stratégie d'intervention.")
-        priority = "CRITIQUE"
+        st.error("**Negative ROI** — Revisit cost structure or targeting strategy before proceeding.")
+        priority = "REVIEW"
 
-    recommendations = [
-        f"🎯 **Ciblage ML**: Le modèle identifie {high_risk_employees} employés prioritaires (précision {model_accuracy:.1%})",
-        f"💰 **Budget Optimal**: {total_program_cost:,.0f}€ pour sauver ~{saved:.0f} employés",
-        f"📊 **Monitoring**: Tracker mensuellement la rétention pour valider l'efficacité",
-        f"🔄 **Itération**: Réentraîner le modèle tous les 6 mois avec nouvelles données",
-        f"🎮 **Scaling Ubisoft**: Succès ici = expansion possible aux autres studios globalement"
+    recs = [
+        f"**ML Targeting:** {r['high_risk_n']} high-risk employees identified as priority for intervention.",
+        f"**Budget:** €{r['total_cost']:,.0f} total investment to prevent ~{r['employees_saved']:.0f} departures.",
+        "**Monitoring:** Track monthly retention rate to validate programme effectiveness.",
+        "**Model refresh:** Retrain the churn model every 6 months on updated data.",
     ]
+    for i, rec in enumerate(recs, 1):
+        st.markdown(f"{i}. {rec}")
 
-    for i, rec in enumerate(recommendations, 1):
-        st.info(f"**{i}.** {rec}")
-
-    # Next Steps
-    st.subheader("📋 Next Steps")
-    if priority == "HAUTE":
-        next_steps = [
-            "✅ Valider le budget avec la direction",
-            "🚀 Lancer le programme pilote sur 3 mois",
-            "📊 Mettre en place le monitoring temps réel",
-            "🎯 Former les équipes RH sur l'utilisation du modèle ML"
+    if priority in ("HIGH", "MEDIUM"):
+        st.markdown("**Suggested next steps:**")
+        steps = [
+            "Secure budget sign-off from HR leadership.",
+            "Launch a 3-month pilot on the highest-risk cohort.",
+            "Set up a real-time retention monitoring dashboard.",
+            "Train HR Business Partners on model output interpretation.",
         ]
-    elif priority == "MOYENNE":
-        next_steps = [
-            "🔧 Optimiser les paramètres d'intervention",
-            "📊 Tester sur un échantillon réduit",
-            "💡 Améliorer la précision du modèle ML",
-            "📈 Ré-évaluer le ROI après ajustements"
-        ]
-    else:
-        next_steps = [
-            "🔍 Analyser les causes du ROI faible",
-            "💰 Réviser les coûts d'intervention",
-            "🎯 Améliorer l'efficacité du ciblage ML",
-            "📊 Benchmarker avec d'autres approches"
-        ]
-
-    for step in next_steps:
-        st.write(f"• {step}")
-
-# Fonction de compatibilité
-def render_roi_calculator(df_roi):
-    return render_roi_calculator_improved(df_roi)
+        for step in steps:
+            st.markdown(f"- {step}")

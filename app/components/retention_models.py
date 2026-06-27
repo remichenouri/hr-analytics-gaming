@@ -1,221 +1,258 @@
-import streamlit as st
+"""Retention Models tab — ML churn prediction with a temporal validation split."""
+
+import logging
+import os
+
+import numpy as np
 import pandas as pd
 import plotly.express as px
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+import streamlit as st
 from sklearn.compose import ColumnTransformer
-from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import joblib
-import numpy as np
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
-def render_retention_models(df_retention):
-    st.header("📈 Talent Retention Predictive Models (No Data Leakage)")
-    
-    # ============ ÉTAPE 1: NETTOYAGE ET FEATURES ENGINEERING ============
-    
-    # Créer des features temporelles robustes (observables au moment T)
-    df_clean = prepare_retention_features(df_retention.copy())
-    
-    # ============ ÉTAPE 2: SPLIT TEMPOREL STRICT ============
-    
-    # Supposons une colonne 'hire_date' ou 'snapshot_date'
-    if 'snapshot_date' not in df_clean.columns:
-        # Créer une date de snapshot simulée pour la demo
-        df_clean['snapshot_date'] = pd.date_range(
-            start='2022-01-01', 
-            periods=len(df_clean), 
-            freq='D'
-        )
-    
-    # Split temporel : 80% train, 20% test
-    cutoff_date = df_clean['snapshot_date'].quantile(0.8)
-    
-    train_mask = df_clean['snapshot_date'] <= cutoff_date
-    test_mask = df_clean['snapshot_date'] > cutoff_date
-    
-    # Features sans fuite (observables au moment T)
-    safe_features = [
-        'tenure_months',           # Ancienneté au moment T
-        'salary_vs_market',        # Ratio salaire/marché au moment T
-        'days_since_promotion',    # Jours depuis dernière promotion
-        'manager_tenure_months',   # Ancienneté du manager
-        'team_size',              # Taille équipe
-        'is_neurodivergent',      # Caractéristique stable
-        'department_encoded',     # Département
-        'level_encoded'           # Niveau hiérarchique
-    ]
-    
-    X_train = df_clean.loc[train_mask, safe_features]
-    X_test = df_clean.loc[test_mask, safe_features]
-    y_train = df_clean.loc[train_mask, 'will_leave_6m']  # Target: partira dans 6 mois
-    y_test = df_clean.loc[test_mask, 'will_leave_6m']
-    
-    st.info(f"📊 **Données d'entraînement**: {len(X_train)} employés | **Test temporel**: {len(X_test)} employés")
-    
-    # ============ ÉTAPE 3: PIPELINE ML SANS FUITE ============
-    
-    # Pipeline avec preprocessing intégré
-    preprocessor = ColumnTransformer([
-        ('num', StandardScaler(), ['tenure_months', 'salary_vs_market', 'days_since_promotion', 
-                                  'manager_tenure_months', 'team_size']),
-        ('cat', 'passthrough', ['is_neurodivergent', 'department_encoded', 'level_encoded'])
-    ])
-    
-    model = Pipeline([
-        ('prep', preprocessor),
-        ('clf', GradientBoostingClassifier(
-            n_estimators=100,
-            max_depth=4,
-            learning_rate=0.1,
-            random_state=42
-        ))
-    ])
-    
-    # ============ ÉTAPE 4: ENTRAÎNEMENT ET VALIDATION ============
-    
-    model.fit(X_train, y_train)
-    
-    # Prédictions sur test temporel
-    y_pred = model.predict(X_test)
-    y_pred_proba = model.predict_proba(X_test)[:, 1]
-    
-    # Métriques robustes
-    accuracy = accuracy_score(y_test, y_pred)
-    auc_score = roc_auc_score(y_test, y_pred_proba)
-    
-    # Validation croisée temporelle
-    tscv = TimeSeriesSplit(n_splits=3)
-    cv_scores = []
-    for train_idx, val_idx in tscv.split(X_train):
-        model.fit(X_train.iloc[train_idx], y_train.iloc[train_idx])
-        val_pred = model.predict_proba(X_train.iloc[val_idx])[:, 1]
-        cv_scores.append(roc_auc_score(y_train.iloc[val_idx], val_pred))
-    
-    cv_mean = np.mean(cv_scores)
-    cv_std = np.std(cv_scores)
-    
-    # ============ ÉTAPE 5: AFFICHAGE DES RÉSULTATS ============
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("🎯 Test Accuracy", f"{accuracy:.1%}", 
-                 help="Performance sur données temporelles hold-out")
-    
-    with col2:
-        st.metric("📈 AUC Score", f"{auc_score:.3f}", 
-                 help="Capacité de discrimination du modèle")
-    
-    with col3:
-        st.metric("🔄 CV Score", f"{cv_mean:.3f} ± {cv_std:.3f}", 
-                 help="Validation croisée temporelle")
-    
-    with col4:
-        retention_rate = 1 - y_train.mean()
-        st.metric("📊 Retention Rate", f"{retention_rate:.1%}", 
-                 help="Taux de rétention historique")
-    
-    # Feature Importance (sans fuite)
-    feature_importance = pd.DataFrame({
-        'Feature': safe_features,
-        'Importance': model.named_steps['clf'].feature_importances_
-    }).sort_values('Importance', ascending=True)
-    
-    fig_importance = px.bar(
-        feature_importance,
-        x='Importance',
-        y='Feature',
-        orientation='h',
-        title="🔍 Facteurs de Rétention - Importance des Variables (Sans Fuite)",
-        labels={'Importance': 'Score d\'Importance', 'Feature': 'Variables'}
+from utils.helpers import PALETTE, apply_default_layout
+
+logger = logging.getLogger(__name__)
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+SAFE_FEATURES = [
+    "tenure_months",
+    "salary_vs_market",
+    "days_since_promotion",
+    "manager_tenure_months",
+    "team_size",
+    "is_neurodivergent",
+    "department_encoded",
+    "level_encoded",
+]
+NUMERIC_FEATURES = [
+    "tenure_months", "salary_vs_market", "days_since_promotion",
+    "manager_tenure_months", "team_size",
+]
+PASSTHROUGH_FEATURES = ["is_neurodivergent", "department_encoded", "level_encoded"]
+
+DEPT_ENCODING = {"Engineering": 1, "Art": 2, "Design": 3, "QA": 4, "Production": 5}
+LEVEL_ENCODING = {"Junior": 1, "Senior": 2, "Lead": 3, "Principal": 4}
+
+TRAIN_RATIO = 0.80
+N_CV_SPLITS = 3
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+
+
+# ── Public entry-point ─────────────────────────────────────────────────────────
+
+def render_retention_models(df_retention: pd.DataFrame) -> None:
+    """Render the Talent Retention tab.
+
+    Args:
+        df_retention: Output of GamingIndustryDataGenerator.generate_retention_data().
+    """
+    st.header("Talent Retention — Predictive Model")
+
+    if df_retention.empty:
+        st.warning("No retention data available.")
+        return
+
+    try:
+        with st.spinner("Preparing features and training model…"):
+            df_clean = _prepare_features(df_retention.copy())
+            model, metrics, feature_importance = _train_model(df_clean)
+
+        _render_metrics_row(metrics)
+        _render_feature_importance(feature_importance)
+        _render_risk_calculator(model)
+        _render_model_save(model)
+
+    except Exception as exc:
+        logger.exception("Retention model rendering failed.")
+        st.error(f"Model error: {exc}")
+
+
+# ── Feature engineering ────────────────────────────────────────────────────────
+
+def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add synthetic temporal features and a binary attrition target to *df*."""
+    rng = np.random.default_rng(42)
+
+    df["snapshot_date"] = pd.date_range(
+        start="2022-01-01", periods=len(df), freq="D"
     )
-    fig_importance.update_layout(height=400)
-    st.plotly_chart(fig_importance, use_container_width=True)
-    
-    # ============ ÉTAPE 6: CALCULATEUR DE RISQUE SÉCURISÉ ============
-    
-    st.subheader("🎯 Calculateur de Risque de Départ (6 mois)")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        tenure_input = st.slider("Ancienneté (mois)", 1, 120, 24)
-        salary_ratio = st.slider("Salaire vs Marché", 0.8, 1.5, 1.0, 0.05)
-        promo_days = st.slider("Jours depuis promotion", 0, 1095, 365)
-        manager_tenure = st.slider("Ancienneté manager (mois)", 1, 60, 18)
-    
-    with col2:
-        team_size_input = st.slider("Taille équipe", 3, 25, 8)
-        neuro_input = st.selectbox("Neurodivergent", ["Non", "Oui"])
-        dept_input = st.selectbox("Département", ["Engineering", "Art", "Design", "QA", "Production"])
-        level_input = st.selectbox("Niveau", ["Junior", "Senior", "Lead", "Principal"])
-    
-    # Encodage des variables catégorielles (à adapter selon vos données)
-    dept_encoding = {"Engineering": 1, "Art": 2, "Design": 3, "QA": 4, "Production": 5}
-    level_encoding = {"Junior": 1, "Senior": 2, "Lead": 3, "Principal": 4}
-    
-    # Prédiction en temps réel
-    prediction_input = pd.DataFrame([[
-        tenure_input, salary_ratio, promo_days, manager_tenure, 
-        team_size_input, 1 if neuro_input == "Oui" else 0,
-        dept_encoding[dept_input], level_encoding[level_input]
-    ]], columns=safe_features)
-    
-    leave_proba = model.predict_proba(prediction_input)[0][1]
-    retention_prob = 1 - leave_proba
-    
-    st.metric("🎯 Probabilité de Rétention", f"{retention_prob:.1%}", 
-             "Likelihood de rester 6 mois")
-    
-    if leave_proba > 0.7:
-        st.error("🚨 **RISQUE ÉLEVÉ** - Intervention immédiate recommandée")
-    elif leave_proba > 0.4:
-        st.warning("⚡ **RISQUE MODÉRÉ** - Surveillance renforcée")
-    else:
-        st.success("✅ **FAIBLE RISQUE** - Employé susceptible de rester")
-    
-    # ============ ÉTAPE 7: SAUVEGARDE DU MODÈLE ============
-    
-    if st.button("💾 Sauvegarder le modèle"):
-        joblib.dump(model, 'models/retention_model_clean.joblib')
-        st.success("Modèle sauvegardé dans models/retention_model_clean.joblib")
+    df["tenure_months"] = rng.integers(1, 121, len(df))
+    df["salary_vs_market"] = rng.uniform(0.80, 1.40, len(df)).round(3)
+    df["days_since_promotion"] = rng.integers(0, 1096, len(df))
+    df["manager_tenure_months"] = rng.integers(6, 85, len(df))
+    df["team_size"] = rng.integers(3, 21, len(df))
+    df["department_encoded"] = rng.integers(1, 6, len(df))
+    df["level_encoded"] = rng.integers(1, 5, len(df))
+    df["will_leave_6m"] = rng.binomial(1, 0.15, len(df))
 
-def prepare_retention_features(df):
-    """
-    Prépare des features sans fuite pour la prédiction de rétention
-    """
-    # Simuler des features temporelles réalistes (à adapter à vos vraies données)
-    
-    # Ancienneté en mois (observable)
-    df['tenure_months'] = np.random.randint(1, 120, len(df))
-    
-    # Ratio salaire vs marché (observable au moment T)
-    df['salary_vs_market'] = np.random.uniform(0.8, 1.4, len(df))
-    
-    # Jours depuis dernière promotion (observable)
-    df['days_since_promotion'] = np.random.randint(0, 1095, len(df))
-    
-    # Ancienneté du manager (observable)
-    df['manager_tenure_months'] = np.random.randint(6, 84, len(df))
-    
-    # Taille de l'équipe (observable)
-    df['team_size'] = np.random.randint(3, 20, len(df))
-    
-    # Variables catégorielles encodées
-    df['department_encoded'] = np.random.randint(1, 6, len(df))
-    df['level_encoded'] = np.random.randint(1, 5, len(df))
-    
-    # Target : va partir dans les 6 prochains mois (à prédire)
-    df['will_leave_6m'] = np.random.binomial(1, 0.15, len(df))  # 15% de turnover
-    
-    # Remplacer 'Is_Neurodivergent' par 'is_neurodivergent' (convention snake_case)
-    if 'Is_Neurodivergent' in df.columns:
-        df['is_neurodivergent'] = df['Is_Neurodivergent']
+    if "Is_Neurodivergent" in df.columns:
+        df["is_neurodivergent"] = df["Is_Neurodivergent"].astype(int)
     else:
-        df['is_neurodivergent'] = np.random.binomial(1, 0.12, len(df))  # 12% neurodivergents
-    
+        df["is_neurodivergent"] = rng.binomial(1, 0.12, len(df))
+
     return df
+
+
+# ── Model training ─────────────────────────────────────────────────────────────
+
+@st.cache_resource(show_spinner=False)
+def _train_model(df: pd.DataFrame) -> tuple[Pipeline, dict, pd.DataFrame]:
+    """Train a Gradient Boosting classifier with temporal validation.
+
+    Cached with st.cache_resource so re-runs do not retrain.
+    """
+    cutoff = df["snapshot_date"].quantile(TRAIN_RATIO)
+    train_mask = df["snapshot_date"] <= cutoff
+
+    X_train = df.loc[train_mask, SAFE_FEATURES]
+    X_test = df.loc[~train_mask, SAFE_FEATURES]
+    y_train = df.loc[train_mask, "will_leave_6m"]
+    y_test = df.loc[~train_mask, "will_leave_6m"]
+
+    preprocessor = ColumnTransformer([
+        ("num", StandardScaler(), NUMERIC_FEATURES),
+        ("cat", "passthrough", PASSTHROUGH_FEATURES),
+    ])
+    model = Pipeline([
+        ("prep", preprocessor),
+        ("clf", GradientBoostingClassifier(
+            n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42,
+        )),
+    ])
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+
+    accuracy = float(accuracy_score(y_test, y_pred))
+    auc = float(roc_auc_score(y_test, y_proba)) if len(np.unique(y_test)) > 1 else float("nan")
+
+    tscv = TimeSeriesSplit(n_splits=N_CV_SPLITS)
+    cv_aucs: list[float] = []
+    for tr_idx, val_idx in tscv.split(X_train):
+        model.fit(X_train.iloc[tr_idx], y_train.iloc[tr_idx])
+        val_proba = model.predict_proba(X_train.iloc[val_idx])[:, 1]
+        y_val = y_train.iloc[val_idx]
+        if len(np.unique(y_val)) > 1:
+            cv_aucs.append(roc_auc_score(y_val, val_proba))
+
+    # Re-fit on full training set after CV loop
+    model.fit(X_train, y_train)
+
+    feature_importance = pd.DataFrame({
+        "Feature": SAFE_FEATURES,
+        "Importance": model.named_steps["clf"].feature_importances_,
+    }).sort_values("Importance", ascending=True)
+
+    metrics = {
+        "accuracy": accuracy,
+        "auc": auc,
+        "cv_mean": float(np.mean(cv_aucs)) if cv_aucs else float("nan"),
+        "cv_std": float(np.std(cv_aucs)) if cv_aucs else float("nan"),
+        "train_n": int(train_mask.sum()),
+        "test_n": int((~train_mask).sum()),
+        "retention_rate": float(1 - y_train.mean()),
+    }
+    return model, metrics, feature_importance
+
+
+# ── Rendering helpers ──────────────────────────────────────────────────────────
+
+def _render_metrics_row(metrics: dict) -> None:
+    st.info(
+        f"**Training set:** {metrics['train_n']:,} employees · "
+        f"**Hold-out (temporal):** {metrics['test_n']:,} employees"
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Test Accuracy", f"{metrics['accuracy']:.1%}",
+              help="Accuracy on the temporal hold-out set")
+    c2.metric("AUC-ROC", f"{metrics['auc']:.3f}",
+              help="Discrimination ability of the model (1 = perfect)")
+    cv_label = (
+        f"{metrics['cv_mean']:.3f} ± {metrics['cv_std']:.3f}"
+        if not np.isnan(metrics["cv_mean"]) else "N/A"
+    )
+    c3.metric("CV AUC (temporal)", cv_label,
+              help=f"TimeSeriesSplit with {N_CV_SPLITS} folds")
+    c4.metric("Historical Retention", f"{metrics['retention_rate']:.1%}",
+              help="% of employees who stayed in the training period")
+
+
+def _render_feature_importance(feature_importance: pd.DataFrame) -> None:
+    fig = px.bar(
+        feature_importance,
+        x="Importance",
+        y="Feature",
+        orientation="h",
+        color="Importance",
+        color_continuous_scale=[
+            [0.0, PALETTE["light"]],
+            [1.0, PALETTE["primary"]],
+        ],
+        labels={"Importance": "Feature Importance Score", "Feature": "Predictor"},
+    )
+    apply_default_layout(fig, "Retention Predictors — Feature Importance")
+    fig.update_layout(
+        height=400,
+        coloraxis_showscale=False,
+        xaxis=dict(gridcolor="#e0e0e0"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_risk_calculator(model: Pipeline) -> None:
+    st.subheader("6-Month Flight Risk Calculator")
+    st.caption("Adjust the sliders to profile an employee and predict their departure probability.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        tenure = st.slider("Tenure (months)", 1, 120, 24)
+        salary_ratio = st.slider("Salary vs Market ratio", 0.80, 1.50, 1.00, 0.05)
+        promo_days = st.slider("Days since last promotion", 0, 1095, 365)
+        mgr_tenure = st.slider("Manager tenure (months)", 1, 60, 18)
+    with col2:
+        team_sz = st.slider("Team size", 3, 25, 8)
+        neuro = st.selectbox("Neurodivergent", ["No", "Yes"])
+        dept = st.selectbox("Department", list(DEPT_ENCODING.keys()))
+        level = st.selectbox("Seniority level", list(LEVEL_ENCODING.keys()))
+
+    input_df = pd.DataFrame([[
+        tenure, salary_ratio, promo_days, mgr_tenure,
+        team_sz, 1 if neuro == "Yes" else 0,
+        DEPT_ENCODING[dept], LEVEL_ENCODING[level],
+    ]], columns=SAFE_FEATURES)
+
+    try:
+        leave_prob = float(model.predict_proba(input_df)[0][1])
+    except Exception:
+        st.error("Prediction failed — please check input values.")
+        return
+
+    retention_prob = 1.0 - leave_prob
+    st.metric("Predicted Retention Probability (6 months)", f"{retention_prob:.1%}")
+
+    if leave_prob > 0.70:
+        st.error("**HIGH RISK** — Immediate engagement action recommended.")
+    elif leave_prob > 0.40:
+        st.warning("**MODERATE RISK** — Proactive check-in advised.")
+    else:
+        st.success("**LOW RISK** — Employee likely to stay.")
+
+
+def _render_model_save(model: Pipeline) -> None:
+    if st.button("Save model to disk"):
+        try:
+            import joblib
+            os.makedirs(MODEL_DIR, exist_ok=True)
+            save_path = os.path.join(MODEL_DIR, "retention_model.joblib")
+            joblib.dump(model, save_path)
+            st.success(f"Model saved to `{save_path}`.")
+        except ImportError:
+            st.error("Install `joblib` to enable model saving.")
+        except OSError as exc:
+            st.error(f"Could not save model: {exc}")

@@ -1,122 +1,167 @@
-import streamlit as st
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pandas as pd
-import numpy as np
+"""Performance Dashboard tab — team and department KPIs."""
 
-def render_performance_dashboard():
-    st.header("🎯 Performance Analytics Dashboard")
-    
-    # Simulation données temps réel
-    current_month = pd.Timestamp.now().strftime('%B %Y')
-    
-    # KPIs principaux
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            "Active Employees",
-            "1,247",
-            "+23 this month",
-            delta_color="normal"
-        )
-    
-    with col2:
-        st.metric(
-            "Avg Performance Score",
-            "4.2/5",
-            "+0.3",
-            delta_color="normal"
-        )
-    
-    with col3:
-        st.metric(
-            "Team Productivity",
-            "87%",
-            "+5%",
-            delta_color="normal"
-        )
-    
-    with col4:
-        st.metric(
-            "Innovation Index",
-            "94/100",
-            "+12 points",
-            delta_color="normal"
-        )
-    
-    # Graphique performance temps réel
-    months = pd.date_range(start='2024-01-01', periods=8, freq='M')
-    performance_scores = np.random.uniform(3.8, 4.5, 8)
-    productivity = np.random.uniform(80, 90, 8)
-    innovation = np.random.uniform(85, 95, 8)
-    
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from plotly.subplots import make_subplots
+
+from utils.helpers import PALETTE, apply_default_layout
+
+# Reproducible synthetic data for this tab
+_RNG = np.random.default_rng(42)
+
+DEPARTMENTS = ["Engineering", "Creative", "QA", "Marketing", "HR"]
+TEAMS = ["Game Dev", "Art", "QA", "Design", "Marketing"]
+MONTHS = pd.date_range(start="2024-01-01", periods=8, freq="ME")
+
+# ── Synthetic KPI data (module-level so it doesn't regenerate on re-runs) ─────
+_PERFORMANCE_SCORES = np.clip(_RNG.normal(4.1, 0.25, len(MONTHS)), 1, 5)
+_PRODUCTIVITY = np.clip(_RNG.normal(85, 4, len(MONTHS)), 60, 100)
+_TEAM_PRODUCTIVITY = np.clip(_RNG.normal(84, 6, len(TEAMS)), 60, 100)
+_DEPT_PERFORMANCE = np.clip(_RNG.normal(4.0, 0.35, len(DEPARTMENTS)), 1, 5)
+_INNOVATION_SCORES = np.clip(_RNG.normal(88, 5, len(DEPARTMENTS)), 60, 100)
+_TEAM_SIZES = _RNG.integers(40, 200, len(DEPARTMENTS))
+
+# Headline KPI values derived from synthetic data (not hardcoded strings)
+_AVG_PERFORMANCE = float(_PERFORMANCE_SCORES.mean())
+_AVG_PRODUCTIVITY = float(_PRODUCTIVITY.mean())
+_TOTAL_HEADCOUNT = int(_RNG.integers(1_150, 1_350))
+_INNOVATION_INDEX = float(_INNOVATION_SCORES.mean())
+
+
+def render_performance_dashboard() -> None:
+    """Render the Performance Analytics tab with reproducible synthetic data."""
+    st.header("Performance Analytics Dashboard")
+
+    try:
+        _render_kpi_row()
+        _render_main_charts()
+        _render_smart_alerts()
+    except Exception as exc:
+        st.error(f"Error rendering Performance Dashboard: {exc}")
+
+
+# ── Private helpers ────────────────────────────────────────────────────────────
+
+def _render_kpi_row() -> None:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Active Employees", f"{_TOTAL_HEADCOUNT:,}", "+18 this month")
+    c2.metric("Avg Performance Score", f"{_AVG_PERFORMANCE:.2f} / 5", "+0.2 vs prior period")
+    c3.metric("Team Productivity", f"{_AVG_PRODUCTIVITY:.0f} %", "+4 pp vs prior period")
+    c4.metric("Innovation Index", f"{_INNOVATION_INDEX:.0f} / 100", "+8 pts vs prior period")
+
+
+def _render_main_charts() -> None:
     fig = make_subplots(
         rows=2, cols=2,
-        subplot_titles=('Performance Trend', 'Productivity by Team', 'Innovation Score', 'Department Comparison'),
-        specs=[[{"secondary_y": True}, {"type": "bar"}],
-               [{"type": "scatter"}, {"type": "bar"}]]
+        subplot_titles=(
+            "Performance Score Trend",
+            "Productivity by Team (%)",
+            "Innovation Score by Department",
+            "Avg Performance Score by Department",
+        ),
+        specs=[
+            [{"secondary_y": True}, {"type": "bar"}],
+            [{"type": "bar"}, {"type": "bar"}],
+        ],
+        vertical_spacing=0.15,
+        horizontal_spacing=0.10,
     )
-    
-    # Performance trend
-    fig.add_trace(
-        go.Scatter(x=months, y=performance_scores, name="Performance", line=dict(color='blue')),
-        row=1, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=months, y=productivity, name="Productivity", line=dict(color='red')),
-        row=1, col=1, secondary_y=True
-    )
-    
-    # Productivity by team
-    teams = ['Game Dev', 'Art', 'QA', 'Design', 'Marketing']
-    team_productivity = np.random.uniform(75, 95, 5)
-    fig.add_trace(
-        go.Bar(x=teams, y=team_productivity, name="Team Productivity", marker_color='lightblue'),
-        row=1, col=2
-    )
-    
-    # Innovation scatter
-    departments = ['Engineering', 'Creative', 'QA', 'Marketing', 'HR']
-    innovation_scores = np.random.uniform(80, 98, 5)
-    team_sizes = np.random.randint(50, 200, 5)
+
+    # ── Row 1, Col 1 — Performance & Productivity trend ──
     fig.add_trace(
         go.Scatter(
-            x=departments, 
-            y=innovation_scores,
-            mode='markers',
-            marker=dict(size=team_sizes/5, color='green', opacity=0.6),
-            name="Innovation"
+            x=MONTHS, y=_PERFORMANCE_SCORES,
+            name="Perf. Score", mode="lines+markers",
+            line=dict(color=PALETTE["primary"], width=2.5),
+            marker=dict(size=6),
+            hovertemplate="%{x|%b %Y}<br>Score: %{y:.2f}<extra>Performance</extra>",
         ),
-        row=2, col=1
+        row=1, col=1,
     )
-    
-    # Department comparison
-    dept_performance = np.random.uniform(3.5, 4.8, 5)
     fig.add_trace(
-        go.Bar(x=departments, y=dept_performance, name="Dept Performance", marker_color='orange'),
-        row=2, col=2
+        go.Scatter(
+            x=MONTHS, y=_PRODUCTIVITY,
+            name="Productivity %", mode="lines+markers",
+            line=dict(color=PALETTE["secondary"], width=2.5, dash="dot"),
+            marker=dict(size=6, symbol="diamond"),
+            hovertemplate="%{x|%b %Y}<br>Productivity: %{y:.1f}%<extra>Productivity</extra>",
+        ),
+        row=1, col=1, secondary_y=True,
     )
-    
-    fig.update_layout(height=600, title_text="📊 Real-Time Performance Analytics")
+
+    # ── Row 1, Col 2 — Productivity by team ──
+    fig.add_trace(
+        go.Bar(
+            x=TEAMS, y=_TEAM_PRODUCTIVITY,
+            name="Team Productivity",
+            marker_color=PALETTE["accent"],
+            text=[f"{v:.0f}%" for v in _TEAM_PRODUCTIVITY],
+            textposition="outside",
+            hovertemplate="%{x}<br>Productivity: %{y:.1f}%<extra></extra>",
+        ),
+        row=1, col=2,
+    )
+
+    # ── Row 2, Col 1 — Innovation by department ──
+    fig.add_trace(
+        go.Bar(
+            x=DEPARTMENTS, y=_INNOVATION_SCORES,
+            name="Innovation Score",
+            marker_color=PALETTE["primary"],
+            text=[f"{v:.0f}" for v in _INNOVATION_SCORES],
+            textposition="outside",
+            hovertemplate="%{x}<br>Innovation: %{y:.0f}<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+
+    # ── Row 2, Col 2 — Performance by department ──
+    fig.add_trace(
+        go.Bar(
+            x=DEPARTMENTS, y=_DEPT_PERFORMANCE,
+            name="Dept Performance",
+            marker_color=PALETTE["warning"],
+            text=[f"{v:.2f}" for v in _DEPT_PERFORMANCE],
+            textposition="outside",
+            hovertemplate="%{x}<br>Score: %{y:.2f}/5<extra></extra>",
+        ),
+        row=2, col=2,
+    )
+
+    apply_default_layout(fig, "Performance Analytics — 2024")
+    fig.update_layout(
+        height=620,
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.12),
+        yaxis=dict(title="Score (1–5)", range=[3.5, 4.8], gridcolor="#e0e0e0"),
+        yaxis2=dict(title="Productivity (%)", ticksuffix=" %"),
+        yaxis3=dict(title="Productivity (%)", ticksuffix=" %", gridcolor="#e0e0e0"),
+        yaxis4=dict(title="Innovation (0–100)", gridcolor="#e0e0e0"),
+        yaxis5=dict(title="Score (1–5)", gridcolor="#e0e0e0"),
+    )
     st.plotly_chart(fig, use_container_width=True)
-    
-    # Alertes et recommandations
-    st.subheader("⚡ Smart Alerts & Recommendations")
-    
-    alerts = [
-        {"type": "success", "message": "🎉 Game Dev team exceeded performance targets by 15%"},
-        {"type": "warning", "message": "⚠️ QA team productivity below average - suggest process review"},
-        {"type": "info", "message": "💡 Innovation scores correlate strongly with neurodiversity (+23%)"},
-        {"type": "error", "message": "🚨 Art team showing early retention risk signals - immediate action needed"}
-    ]
-    
-    for alert in alerts:
-        if alert["type"] == "success":
-            st.success(alert["message"])
-        elif alert["type"] == "warning":
-            st.warning(alert["message"])
-        elif alert["type"] == "info":
-            st.info(alert["message"])
-        elif alert["type"] == "error":
-            st.error(alert["message"])
+
+
+def _render_smart_alerts() -> None:
+    st.subheader("Smart Alerts")
+
+    best_team = TEAMS[int(np.argmax(_TEAM_PRODUCTIVITY))]
+    worst_team = TEAMS[int(np.argmin(_TEAM_PRODUCTIVITY))]
+    best_dept = DEPARTMENTS[int(np.argmax(_DEPT_PERFORMANCE))]
+
+    st.success(
+        f"**{best_team}** leads in productivity at "
+        f"{_TEAM_PRODUCTIVITY.max():.0f}% — document and scale their practices."
+    )
+    st.warning(
+        f"**{worst_team}** productivity is at "
+        f"{_TEAM_PRODUCTIVITY.min():.0f}% — schedule a process review."
+    )
+    st.info(
+        f"**{best_dept}** scores highest on innovation ({_INNOVATION_SCORES.max():.0f}/100) "
+        "— strong correlation with neurodiversity programmes detected."
+    )
+    if _AVG_PRODUCTIVITY < 82:
+        st.error("Overall productivity below the 82% target threshold — executive review recommended.")
