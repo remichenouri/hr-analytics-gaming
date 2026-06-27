@@ -1,51 +1,46 @@
-# 🇫🇷 ADHD Observatory — France
+# HR Analytics — Gaming Industry
 
-*Epidemiological analysis of ADHD in France using national health data*
+*Workforce planning & diversity KPIs for the gaming industry — portfolio case study using synthetic data.*
 
-[![Live App](https://img.shields.io/badge/App-Live-brightgreen)](https://observatoire-tdah-france.streamlit.app/)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/streamlit-brightred)](https://streamlit.io/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+> **Disclaimer:** This is a portfolio project. All data is synthetic. Not affiliated with any company.
 
 ---
 
 ## Overview
 
-An interactive Streamlit dashboard for exploring trends in ADHD diagnosis and medication in France (2018–2024), built on open public health data.
+An interactive Streamlit dashboard for HR analytics in the gaming industry — workforce planning, diversity KPIs, salary benchmarking, and attrition modeling.
 
-Covers prescription volumes, regional disparities, demographic breakdowns, and longitudinal trends — with export capabilities for further analysis.
-
-**Data sources**: Open Medic (reimbursed prescriptions), Cartographie des pathologies CNAM, Medic'AM — all publicly available from [data.ameli.fr](https://data.ameli.fr) and [data.gouv.fr](https://data.gouv.fr).
+Built as a portfolio case study to demonstrate applied HR analytics techniques using Python, SQL, and interactive visualization.
 
 ---
 
 ## Features
 
-- 📊 **Dynamic dashboards** — prescription volumes and trends (2018–2024)
-- 🗺️ **Regional breakdown** — geographic disparities across French departments
-- 🔍 **Filters** — by region, treatment type, period, age group
-- 📈 **Interactive charts** — time series, maps, histograms (Plotly)
-- 📥 **Data export** — CSV/Excel download for further analysis
-- 📄 **Automated reports** — PDF and Power BI outputs
+- 📊 **Workforce dashboard** — headcount trends, department breakdown, seniority distribution
+- 🎯 **Diversity KPIs** — gender, seniority, and team composition tracking
+- 💰 **Salary analysis** — compensation distribution by role and region
+- 📉 **Attrition modeling** — churn risk scoring with feature importance (SHAP)
+- 🔍 **Interactive filters** — by studio, role, region, and time period
 
 ---
 
 ## Repository structure
 
 ```
-observatoire-tdah-france/
-├── data/              # Raw and cleaned datasets
-│   └── prescriptions_2018_2024.csv
-├── notebooks/         # Exploratory Jupyter notebooks
-├── scripts/           # Ingestion and transformation scripts
-├── src/               # Reusable Python modules
-├── streamlit-app/     # Streamlit application
-│   ├── main.py
-│   └── requirements.txt
-├── power bi/          # Power BI dashboard files (.pbix)
-├── reports/           # Generated reports (PDF, HTML)
-├── tests/             # Unit tests
-└── requirements.txt
+hr-analytics-gaming/
+├── app.py                  # Main Streamlit application
+├── src/
+│   ├── data_loader.py      # Synthetic data generation
+│   ├── kpi_engine.py       # KPI computation logic
+│   └── viz.py              # Chart helpers (Plotly)
+├── data/
+│   └── synthetic/          # Auto-generated on first run
+├── requirements.txt
+└── README.md
 ```
 
 ---
@@ -53,34 +48,33 @@ observatoire-tdah-france/
 ## Getting started
 
 ```bash
-git clone https://github.com/remichenouri/observatoire-tdah-france.git
-cd observatoire-tdah-france
-python3 -m venv .venv && source .venv/bin/activate
+git clone https://github.com/remichenouri/hr-analytics-gaming.git
+cd hr-analytics-gaming
 pip install -r requirements.txt
-streamlit run streamlit-app/main.py
+streamlit run app.py
 ```
 
 ---
 
 ## Tech stack
 
-`Python 3.9+` · `Streamlit` · `pandas` · `NumPy` · `Plotly` · `scikit-learn` · `Power BI` · `pytest`
+`Python 3.9+` · `Streamlit` · `pandas` · `Plotly` · `scikit-learn` · `SHAP` · `SQL`
 
 ---
 
 ## Use cases
 
-- **Researchers & data scientists** — longitudinal trend analysis and predictive modelling
-- **Healthcare analysts** — regional prescription benchmarking
-- **Policy analysts** — evaluating geographic disparities and healthcare access
+- **HR analysts** — tracking workforce diversity and compensation equity
+- **Data analysts** — exploring HR analytics techniques on a realistic synthetic dataset
+- **Portfolio** — demonstrates applied analytics in a domain-specific context
 
 ---
 
 ## Contact
 
-**Rémi Chenouri** — Commercial Excellence Data Analyst | Healthcare  
+**Rémi Chenouri** — Healthcare Data Analyst | Commercial Performance  
 📧 chenouri.remi@proton.me · [LinkedIn](https://linkedin.com/in/remi-chenouri)
 
 ---
 
-*Built with open data — Observatoire TDAH France is a portfolio project for data analysis and visualisation in public health.*
+*Portfolio project — synthetic data only. Not affiliated with any gaming company.*
